@@ -17,4 +17,5 @@ interface User : Entity<User> {
 
     var roles: MutableList<Role>
     var permission: MutableList<Permission>
+    var asset: Asset?
 }

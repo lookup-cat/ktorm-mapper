@@ -1,3 +1,5 @@
+@file:Suppress("UNCHECKED_CAST")
+
 package com.htt.ktorm.mapper
 
 import org.ktorm.dsl.Query
@@ -68,9 +70,16 @@ open class RowSetMapper<E : Entity<E>>(
     /**
      * 添加一对多映射
      */
-    fun <T : Entity<T>> hasOne(targetTable: Table<T>, property: KMutableProperty<*>): OneToOne<T> {
+    fun <T : Entity<T>> hasOne(
+        targetTable: Table<T>,
+        property: KMutableProperty<*>,
+        vararg ids: Column<*>,
+        block: OneToOne<T>.() -> Unit = {}
+    ): OneToOne<T> {
         val oneToOne = OneToOne(targetTable, property, this)
         this.oneToOneList.add(oneToOne)
+        oneToOne.ids(*ids)
+        block(oneToOne)
         return oneToOne
     }
 
@@ -80,10 +89,12 @@ open class RowSetMapper<E : Entity<E>>(
     inline fun <T : Entity<T>> hasMany(
         targetTable: Table<T>,
         property: KMutableProperty<*>,
+        vararg ids: Column<*>,
         block: OneToMany<T>.() -> Unit = {}
     ): OneToMany<T> {
         val oneToMany = OneToMany(targetTable, property, this)
         this.oneToManyList.add(oneToMany)
+        oneToMany.ids(*ids)
         block(oneToMany)
         return oneToMany
     }
@@ -100,8 +111,11 @@ open class RowSetMapper<E : Entity<E>>(
 /**
  * 创建实体映射 RowSetMapper
  */
-inline fun <E : Entity<E>> Table<E>.rowSetMapper(block: RowSetMapper<E>.() -> Unit): RowSetMapper<E> {
-    return RowSetMapper(this).apply(block)
+inline fun <E : Entity<E>> Table<E>.rowSetMapper(
+    vararg ids: Column<*>,
+    block: RowSetMapper<E>.() -> Unit
+): RowSetMapper<E> {
+    return RowSetMapper(this).apply { ids(*ids) }.apply(block)
 }
 
 // { mapper: { rowKey :partialObject(entity/collections) } }
@@ -127,12 +141,14 @@ fun <E : Entity<E>> Query.mapMany(mapper: RowSetMapper<E>): List<E> {
  */
 fun <E : Entity<E>> Query.mapOne(mapper: RowSetMapper<E>): E? {
     val rowKeyMapper = RowKeyMapper()
-    var entity:E? = null
+    var entity: E? = null
     for (queryRowSet in this) {
         if (entity == null) {
             entity = queryRowSet.mapToEntity(mapper.table)
         }
-        queryRowSet.mapChild(mapper,rowKeyMapper,entity)
+        if (entity != null) {
+            queryRowSet.mapChild(mapper, rowKeyMapper, entity)
+        }
     }
     return entity
 }
@@ -189,12 +205,17 @@ fun <E : Entity<E>> QueryRowSet.mapMany(
 ) {
     val rowKey = this.getRowKey(mapper)
     val rowKeyMap = rowKeyCache.computeIfAbsent(mapper) { mutableMapOf() }
-    val entity = rowKeyMap.computeIfAbsent(rowKey) {
-        val entity = this.mapToEntity(mapper.table)
-        result.add(entity)
-        entity
-    } as E
-    this.mapChild(mapper, rowKeyCache, entity)
+    var entity: E? = null
+    if (!rowKeyMap.containsKey(rowKey)) {
+        entity = this.mapToEntity(mapper.table)
+        if (entity != null) {
+            result.add(entity)
+            rowKeyMap[rowKey] = entity
+        }
+    }
+    if (entity != null) {
+        this.mapChild(mapper, rowKeyCache, entity)
+    }
 }
 
 fun <P : Entity<P>, E : Entity<E>> QueryRowSet.mapOne(
@@ -204,12 +225,17 @@ fun <P : Entity<P>, E : Entity<E>> QueryRowSet.mapOne(
 ) {
     val rowKey = this.getRowKey(mapper)
     val rowKeyMap = rowKeyCache.computeIfAbsent(mapper) { mutableMapOf() }
-    val entity = rowKeyMap.computeIfAbsent(rowKey) {
-        val entity = this.mapToEntity(mapper.table)
-        mapper.property.call(parent, entity)
-        entity
-    } as E
-    this.mapChild(mapper, rowKeyCache, entity)
+    var entity: E? = null
+    if (!rowKeyMap.containsKey(rowKey)) {
+        entity = this.mapToEntity(mapper.table)
+        if (entity != null) {
+            mapper.property.setter.call(parent, entity)
+            rowKeyMap[rowKey] = entity
+        }
+    }
+    if (entity != null) {
+        this.mapChild(mapper, rowKeyCache, entity)
+    }
 }
 
 private fun <E : Entity<E>> QueryRowSet.mapChild(

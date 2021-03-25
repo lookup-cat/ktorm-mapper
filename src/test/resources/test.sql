@@ -16,6 +16,22 @@ CREATE DATABASE /*!32312 IF NOT EXISTS*/`KtormMapper` /*!40100 DEFAULT CHARACTER
 
 USE `KtormMapper`;
 
+/*Table structure for table `Asset` */
+
+DROP TABLE IF EXISTS `Asset`;
+
+CREATE TABLE `Asset` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(32) DEFAULT NULL,
+  `userId` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
+
+/*Data for the table `Asset` */
+
+insert  into `Asset`(`id`,`name`,`userId`) values 
+(1,'房子',1);
+
 /*Table structure for table `Permission` */
 
 DROP TABLE IF EXISTS `Permission`;
