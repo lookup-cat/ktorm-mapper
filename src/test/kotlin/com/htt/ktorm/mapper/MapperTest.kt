@@ -54,4 +54,5 @@ class MapperTest {
         val json = objectMapper.writeValueAsString(list)
         println(json)
     }
+
 }

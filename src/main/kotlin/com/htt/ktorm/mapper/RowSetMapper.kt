@@ -15,7 +15,8 @@ open class RowSetMapper<E : Entity<E>>(
 ) {
 
     // 实体的唯一标识列集合
-    open var ids: List<Column<*>> = emptyList()
+    open var entityIds: Array<Column<*>> = emptyArray()
+    open val mapperId: Short = 0
     val oneToManyList = mutableListOf<OneToMany<*>>()
     val oneToOneList = mutableListOf<OneToOne<*>>()
 
@@ -25,27 +26,28 @@ open class RowSetMapper<E : Entity<E>>(
     ) : RowSetMapper<E>(table) {
 
         //包含所有父级Mapper的ids + 当前Mapper的ids
-        var allIds: List<Column<*>> = computeAllIds()
+        var allEntityIds: Array<Column<*>> = computeAllIds()
+        abstract override val mapperId: Short
 
         /**
          * 设置当前Mapper的唯一标识列集合
          */
-        override fun ids(vararg ids: Column<*>): RowSetMapper<E> {
-            super.ids(*ids)
-            allIds = computeAllIds()
+        override fun entityIds(vararg entityIds: Column<*>): RowSetMapper<E> {
+            super.entityIds(*entityIds)
+            allEntityIds = computeAllIds()
             return this
         }
 
-        private fun computeAllIds(): List<Column<*>> {
+        private fun computeAllIds(): Array<Column<*>> {
             val ids = mutableListOf<Column<*>>()
             val parent = parentMapper
-            ids += this.ids
-            ids += if (parent is ChildMapper<*>) {
-                parent.allIds
+
+             if (parent is ChildMapper<*>) {
+                parent.allEntityIds +  this.entityIds
             } else {
-                parent.ids
+                parent.entityIds.toList()
             }
-            return ids
+            return ids.toTypedArray()
         }
     }
 
@@ -55,16 +57,18 @@ open class RowSetMapper<E : Entity<E>>(
     class OneToMany<T : Entity<T>>(
         targetTable: Table<T>,
         val property: KMutableProperty<*>,
+        override val mapperId: Short,
         parentMapper: RowSetMapper<*>
     ) : ChildMapper<T>(targetTable, parentMapper)
 
     /**
-     * 一对一映射
+     * 一对一映射`
      */
     class OneToOne<T : Entity<T>>(
         targetTable: Table<T>,
         val property: KMutableProperty<*>,
-        parentMapper: RowSetMapper<*>
+        override val mapperId: Short,
+        parentMapper: RowSetMapper<*>,
     ) : ChildMapper<T>(targetTable, parentMapper)
 
     /**
@@ -73,12 +77,12 @@ open class RowSetMapper<E : Entity<E>>(
     fun <T : Entity<T>> hasOne(
         targetTable: Table<T>,
         property: KMutableProperty<*>,
-        vararg ids: Column<*>,
+        vararg entityIds: Column<*>,
         block: OneToOne<T>.() -> Unit = {}
     ): OneToOne<T> {
-        val oneToOne = OneToOne(targetTable, property, this)
+        val oneToOne = OneToOne(targetTable, property, mapperId.inc(), this)
         this.oneToOneList.add(oneToOne)
-        oneToOne.ids(*ids)
+        oneToOne.entityIds(*entityIds)
         block(oneToOne)
         return oneToOne
     }
@@ -89,12 +93,12 @@ open class RowSetMapper<E : Entity<E>>(
     inline fun <T : Entity<T>> hasMany(
         targetTable: Table<T>,
         property: KMutableProperty<*>,
-        vararg ids: Column<*>,
+        vararg entityIds: Column<*>,
         block: OneToMany<T>.() -> Unit = {}
     ): OneToMany<T> {
-        val oneToMany = OneToMany(targetTable, property, this)
+        val oneToMany = OneToMany(targetTable, property, mapperId.inc(), this)
         this.oneToManyList.add(oneToMany)
-        oneToMany.ids(*ids)
+        oneToMany.entityIds(*entityIds)
         block(oneToMany)
         return oneToMany
     }
@@ -102,8 +106,8 @@ open class RowSetMapper<E : Entity<E>>(
     /**
      * 设置唯一标识列集合
      */
-    open fun ids(vararg ids: Column<*>): RowSetMapper<E> {
-        this.ids = ids.toList()
+    open fun entityIds(vararg entityIds: Column<*>): RowSetMapper<E> {
+        this.entityIds = entityIds as Array<Column<*>>
         return this
     }
 }
@@ -115,10 +119,10 @@ inline fun <E : Entity<E>> Table<E>.rowSetMapper(
     vararg ids: Column<*>,
     block: RowSetMapper<E>.() -> Unit
 ): RowSetMapper<E> {
-    return RowSetMapper(this).apply { ids(*ids) }.apply(block)
+    return RowSetMapper(this).apply { entityIds(*ids) }.apply(block)
 }
 
-// { mapper: { rowKey :partialObject(entity/collections) } }
+// { rowKey: (entity/collections) }
 typealias RowKeyCache = MutableMap<RowSetMapper<*>, MutableMap<Any, Any>>
 
 @Suppress("FunctionName")
@@ -166,13 +170,13 @@ fun <E : Entity<E>> Query.mapOne(mapper: RowSetMapper<E>): E? {
  *      |3      |王五           |3      |运维       |
  *      +-------+-------------+-------+---------+
  * 此表中一个User有多个Role
- * User的唯一表示列为 'User_id'
- * Role的唯一表示列为 'Role_id'
+ * User的entityIds为 'User_id'
+ * Role的entityIds为 'Role_id'
  *
- * 那么根据User的id可以得出 表中第二和第三行 是同一个User对象
- * 这两行通过User的Mapper获取到的RowKey都是 (int)2
+ * 那么根据User的entityIds可以得出 表中第二和第三行 是同一个User对象
+ * 这两行通过User的Mapper获取到的RowKey都是 [mapperId,(int)2]
  *
- * 而这两行数据通过Role的Mapper获取到的RowKey分别是 [2,2] [2,3]
+ * 而这两行数据通过Role的Mapper获取到的RowKey分别是 [mapperId,2,2] [mapperId,2,3]
  * 列表第一个元素为User的id 第二个元素为Role的id
  * 因此可以区分出这是两个Role对象
  *
@@ -180,21 +184,30 @@ fun <E : Entity<E>> Query.mapOne(mapper: RowSetMapper<E>): E? {
 fun QueryRowSet.getRowKey(mapper: RowSetMapper<*>): Any {
     if (mapper is RowSetMapper.ChildMapper) {
         //需要获取所有父级的id
-        val childIds = mapper.ids
+        val childIds = mapper.entityIds
         return if (childIds.isEmpty()) {
-            mapper.allIds
+            mapper.allEntityIds
                 .map { this[it] }
                 .toMutableList()
-                .apply { add(this@getRowKey.row) }  // 如果id列表为空 那么取行号为id
+                .apply {
+                    add(0, mapper.mapperId)
+                    add(this@getRowKey.row) // 如果id列表为空 那么取行号为id
+                }
         } else {
-            mapper.allIds
+            mapper.allEntityIds
                 .map { this[it] }
+                .toMutableList()
+                .apply { add(0, mapper.mapperId) }
         }
     } else {
-        val ids = mapper.ids
-        if (ids.isEmpty()) return this.row // 如果id列表为空 那么取行号为id
-        if (ids.size == 1) return this[ids.first()]!!
-        return ids.map { this[it] }
+        val entityIds = mapper.entityIds
+        if (entityIds.isEmpty()) return listOf(mapper.mapperId, this.row)  // 如果id列表为空 那么取行号为id
+        if (entityIds.size == 1) return listOf(mapper.mapperId, this[entityIds.first()])
+        entityIds.map { this[it] }.toTypedArray()
+        listOf(mapper.mapperId, )
+        return entityIds.map { this[it] }
+            .toMutableList()
+            .apply { add(0,mapper.mapperId) }
     }
 }
 
