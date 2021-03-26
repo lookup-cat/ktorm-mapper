@@ -1,5 +1,16 @@
 ### 支持ktorm框架的一对多 一对一映射
 
+- 添加依赖
+
+```groovy
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+dependencies {
+    implementation("com.github.641571835:ktorm-mapper:1.3")
+}
+```
+
 - 使用示例
 
 ```kotlin
@@ -19,7 +30,9 @@
 val json = objectMapper.writeValueAsString(list)
 println(json)
 ```
+
 - 输出结果
+
 ```json
 [
   {
