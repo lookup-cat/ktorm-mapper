@@ -39,15 +39,11 @@ open class RowSetMapper<E : Entity<E>>(
         }
 
         private fun computeAllIds(): Array<Column<*>> {
-            val ids = mutableListOf<Column<*>>()
-            val parent = parentMapper
-
-             if (parent is ChildMapper<*>) {
-                parent.allEntityIds +  this.entityIds
+            return if (parentMapper is ChildMapper<*>) {
+                parentMapper.allEntityIds + this.entityIds
             } else {
-                parent.entityIds.toList()
+                parentMapper.entityIds + this.entityIds
             }
-            return ids.toTypedArray()
         }
     }
 
@@ -123,16 +119,17 @@ inline fun <E : Entity<E>> Table<E>.rowSetMapper(
 }
 
 // { rowKey: (entity/collections) }
-typealias RowKeyCache = MutableMap<RowSetMapper<*>, MutableMap<Any, Any>>
+// rowKey: mapperId + entityColumnValues
+typealias RowKeyCache = MutableMap<Any, Any>
 
 @Suppress("FunctionName")
-fun RowKeyMapper() = mutableMapOf<RowSetMapper<*>, MutableMap<Any, Any>>()
+fun RowKeyCache() = mutableMapOf<Any,Any>()
 
 /**
  * 从查询结果中映射到List集合
  */
 fun <E : Entity<E>> Query.mapMany(mapper: RowSetMapper<E>): List<E> {
-    val rowKeyMapper = RowKeyMapper()
+    val rowKeyMapper = RowKeyCache()
     val result = mutableListOf<Any>()
     for (queryRowSet in this) {
         queryRowSet.mapMany(mapper, rowKeyMapper, result)
@@ -144,7 +141,7 @@ fun <E : Entity<E>> Query.mapMany(mapper: RowSetMapper<E>): List<E> {
  * 从查询结果中映射到单个实体 结果可能为null
  */
 fun <E : Entity<E>> Query.mapOne(mapper: RowSetMapper<E>): E? {
-    val rowKeyMapper = RowKeyMapper()
+    val rowKeyMapper = RowKeyCache()
     var entity: E? = null
     for (queryRowSet in this) {
         if (entity == null) {
@@ -186,28 +183,19 @@ fun QueryRowSet.getRowKey(mapper: RowSetMapper<*>): Any {
         //需要获取所有父级的id
         val childIds = mapper.entityIds
         return if (childIds.isEmpty()) {
-            mapper.allEntityIds
-                .map { this[it] }
-                .toMutableList()
+            mutableListOf<Any?>(mapper.mapperId)
                 .apply {
-                    add(0, mapper.mapperId)
+                    addAll(mapper.allEntityIds.map { this@getRowKey[it] })
                     add(this@getRowKey.row) // 如果id列表为空 那么取行号为id
                 }
         } else {
-            mapper.allEntityIds
-                .map { this[it] }
-                .toMutableList()
-                .apply { add(0, mapper.mapperId) }
+            listOf(mapper.mapperId) + mapper.allEntityIds.map { this@getRowKey[it] }
         }
     } else {
         val entityIds = mapper.entityIds
         if (entityIds.isEmpty()) return listOf(mapper.mapperId, this.row)  // 如果id列表为空 那么取行号为id
         if (entityIds.size == 1) return listOf(mapper.mapperId, this[entityIds.first()])
-        entityIds.map { this[it] }.toTypedArray()
-        listOf(mapper.mapperId, )
-        return entityIds.map { this[it] }
-            .toMutableList()
-            .apply { add(0,mapper.mapperId) }
+        return listOf(mapper.mapperId) + mapper.entityIds.map { this@getRowKey[it] }
     }
 }
 
@@ -217,13 +205,12 @@ fun <E : Entity<E>> QueryRowSet.mapMany(
     result: MutableList<Any>
 ) {
     val rowKey = this.getRowKey(mapper)
-    val rowKeyMap = rowKeyCache.computeIfAbsent(mapper) { mutableMapOf() }
     var entity: E? = null
-    if (!rowKeyMap.containsKey(rowKey)) {
+    if (!rowKeyCache.containsKey(rowKey)) {
         entity = this.mapToEntity(mapper.table)
         if (entity != null) {
             result.add(entity)
-            rowKeyMap[rowKey] = entity
+            rowKeyCache[rowKey] = entity
         }
     }
     if (entity != null) {
@@ -237,13 +224,12 @@ fun <P : Entity<P>, E : Entity<E>> QueryRowSet.mapOne(
     rowKeyCache: RowKeyCache
 ) {
     val rowKey = this.getRowKey(mapper)
-    val rowKeyMap = rowKeyCache.computeIfAbsent(mapper) { mutableMapOf() }
     var entity: E? = null
-    if (!rowKeyMap.containsKey(rowKey)) {
+    if (!rowKeyCache.containsKey(rowKey)) {
         entity = this.mapToEntity(mapper.table)
         if (entity != null) {
             mapper.property.setter.call(parent, entity)
-            rowKeyMap[rowKey] = entity
+            rowKeyCache[rowKey] = entity
         }
     }
     if (entity != null) {
