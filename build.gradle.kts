@@ -1,10 +1,10 @@
 plugins {
     kotlin("jvm") version "1.4.21"
-    `maven-publish`
+    maven
 }
 
 group = "com.htt"
-version = "1.1"
+version = "1.2"
 
 repositories {
     mavenCentral()
@@ -20,16 +20,4 @@ dependencies {
     testImplementation("org.mariadb.jdbc:mariadb-java-client:2.7.2")
     testImplementation("junit:junit:4.13.1")
     testImplementation("org.ktorm:ktorm-jackson:${ktormVersion}")
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            groupId = "com.htt"
-            artifactId = "ktorm-mapper"
-            version = "1.1"
-
-            from(components["java"])
-        }
-    }
 }
