@@ -7,7 +7,7 @@ repositories {
     maven { url 'https://jitpack.io' }
 }
 dependencies {
-    implementation("com.github.641571835:ktorm-mapper:1.3")
+    implementation("com.github.641571835:ktorm-mapper:1.4")
 }
 ```
 
